@@ -4,7 +4,7 @@ import errno
 import random
 import re
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from wox_plugin import (
     ActionContext,
@@ -26,6 +26,32 @@ DEFAULT_LOW = 1024
 DEFAULT_HIGH = 65535
 # 大范围随机尝试次数；小范围会全量洗牌遍历，不受此限制。
 MAX_RANDOM_ATTEMPTS = 200
+
+# 所有 i18n key（与 plugin.json 的 I18n 映射一一对应）。
+I18N_KEYS: tuple[str, ...] = (
+    "err_range_out_of_bounds",
+    "err_low_gt_high",
+    "err_port_out_of_bounds",
+    "err_range_parse",
+    "err_range_required",
+    "err_unrecognized",
+    "title_invalid_format",
+    "subtitle_invalid_format",
+    "title_syntax_help",
+    "subtitle_syntax_help",
+    "title_candidate",
+    "subtitle_candidate",
+    "action_copy_port",
+    "status_unknown",
+    "status_in_use",
+    "status_free",
+    "title_single",
+    "subtitle_single",
+    "action_copy_windows_cmd",
+    "action_copy_powershell",
+    "action_copy_lsof",
+    "action_copy_ss",
+)
 
 # 全角 / 中文标点 → 半角，便于解析
 _FULLWIDTH_MAP = str.maketrans(
@@ -55,7 +81,8 @@ class ParsedInput:
     port: int | None = None
     low: int | None = None
     high: int | None = None
-    error: str = ""
+    error_key: str = ""
+    error_params: dict[str, object] = field(default_factory=dict)
     display: str = ""
 
     @property
@@ -82,15 +109,15 @@ class PortStatus:
         return self.permission_denied and not self.in_use
 
 
-def _err(msg: str) -> ParsedInput:
-    return ParsedInput(kind="error", error=msg)
+def _err(key: str, **params: object) -> ParsedInput:
+    return ParsedInput(kind="error", error_key=key, error_params=params)
 
 
 def _validate_range(low: int, high: int) -> ParsedInput | None:
     if low < MIN_PORT or high > MAX_PORT:
-        return _err(f"端口范围须在 {MIN_PORT}-{MAX_PORT} 内")
+        return _err("err_range_out_of_bounds", min=MIN_PORT, max=MAX_PORT)
     if low > high:
-        return _err("下限大于上限，没有可用端口")
+        return _err("err_low_gt_high")
     return None
 
 
@@ -113,7 +140,7 @@ def parse_input(raw: str) -> ParsedInput:
     if re.fullmatch(r"\d+", compact):
         port = int(compact)
         if not MIN_PORT <= port <= MAX_PORT:
-            return _err(f"端口须在 {MIN_PORT}-{MAX_PORT} 内")
+            return _err("err_port_out_of_bounds", min=MIN_PORT, max=MAX_PORT)
         return ParsedInput(kind="single", port=port, display=str(port))
 
     # 括号区间: [8000,9000] / (8000,9000) / [8000,9000) / (8000,9000]
@@ -130,7 +157,7 @@ def parse_input(raw: str) -> ParsedInput:
             else:
                 high = int(right_s) - (1 if right_bracket == ")" else 0)
         except ValueError:
-            return _err("区间数字无法解析")
+            return _err("err_range_parse")
         bad = _validate_range(low, high)
         if bad:
             return bad
@@ -142,7 +169,7 @@ def parse_input(raw: str) -> ParsedInput:
         op, num_s = m.groups()
         num = int(num_s)
         if not MIN_PORT <= num <= MAX_PORT:
-            return _err(f"端口须在 {MIN_PORT}-{MAX_PORT} 内")
+            return _err("err_port_out_of_bounds", min=MIN_PORT, max=MAX_PORT)
         if op == ">":
             low, high = num + 1, MAX_PORT
         elif op == ">=":
@@ -161,7 +188,7 @@ def parse_input(raw: str) -> ParsedInput:
     if m:
         low = int(m.group(1))
         if not MIN_PORT <= low <= MAX_PORT:
-            return _err(f"端口须在 {MIN_PORT}-{MAX_PORT} 内")
+            return _err("err_port_out_of_bounds", min=MIN_PORT, max=MAX_PORT)
         return ParsedInput(kind="range", low=low, high=MAX_PORT, display=f"{low}-{MAX_PORT}")
 
     # 区间分隔符: 8000-9000 / 8000~9000 / 8000..9000 / 8000- / -9000
@@ -170,7 +197,7 @@ def parse_input(raw: str) -> ParsedInput:
         if m:
             left_s, right_s = m.groups()
             if left_s == "" and right_s == "":
-                return _err("请给出范围，如 8000-9000")
+                return _err("err_range_required")
             low = int(left_s) if left_s != "" else MIN_PORT
             high = int(right_s) if right_s != "" else MAX_PORT
             bad = _validate_range(low, high)
@@ -178,7 +205,7 @@ def parse_input(raw: str) -> ParsedInput:
                 return bad
             return ParsedInput(kind="range", low=low, high=high, display=f"{low}-{high}")
 
-    return _err("无法识别的格式")
+    return _err("err_unrecognized")
 
 
 def _try_bind(family: int, sock_type: int, address: tuple) -> tuple[bool, bool]:
@@ -282,6 +309,11 @@ async def _action_copy_text(ctx: Context, ac: ActionContext) -> None:
         await plugin.api.copy(ctx, CopyParams(type=CopyType.TEXT, text=text))
 
 
+async def _load_translations(api: PublicAPI, ctx: Context) -> dict[str, str]:
+    """一次性取回全部 i18n 文案，供查询期间同步格式化使用。"""
+    return {key: await api.get_translation(ctx, key) for key in I18N_KEYS}
+
+
 class PortGeneratorPlugin(Plugin):
     api: PublicAPI
 
@@ -290,24 +322,26 @@ class PortGeneratorPlugin(Plugin):
 
     async def query(self, ctx: Context, query: Query) -> list[Result]:
         parsed = parse_input(query.search or "")
+        t = await _load_translations(self.api, ctx)
 
         if parsed.kind == "error":
+            error_msg = t[parsed.error_key].format(**parsed.error_params)
             return [
                 Result(
-                    title="格式不正确",
-                    sub_title=f"{parsed.error} · 例如: 8080 / 8000-9000 / [8000,9000] / >=8000",
+                    title=t["title_invalid_format"],
+                    sub_title=t["subtitle_invalid_format"].format(error=error_msg),
                     icon=_icon("⚠️"),
                 ),
                 Result(
-                    title="端口语法速查",
-                    sub_title="单个: 8080 | 区间: 8000-9000 / 8000~9000 | 括号: [8000,9000] | 比较: >8000 / >=8000 / <8000 / <=8000",
+                    title=t["title_syntax_help"],
+                    sub_title=t["subtitle_syntax_help"],
                     icon=_icon("📖"),
                 ),
             ]
 
         if parsed.kind == "single":
             assert parsed.port is not None
-            return self._single_port_results(parsed.port)
+            return self._single_port_results(parsed.port, t)
 
         # 空白 / 范围: 预览候选
         assert parsed.low is not None and parsed.high is not None
@@ -317,49 +351,49 @@ class PortGeneratorPlugin(Plugin):
         if preview is not None:
             results.append(
                 Result(
-                    title=f"候选: {preview} (未占用)",
-                    sub_title=f"在 {low}-{high} 内随机抽到的空闲端口 · 回车复制端口号",
+                    title=t["title_candidate"].format(port=preview),
+                    sub_title=t["subtitle_candidate"].format(low=low, high=high),
                     icon=_icon("🟢"),
-                    actions=[_copy_action("复制端口号", "📋", str(preview), is_default=True)],
+                    actions=[_copy_action(t["action_copy_port"], "📋", str(preview), is_default=True)],
                 )
             )
         if parsed.kind == "empty":
             results.append(
                 Result(
-                    title="端口语法速查",
-                    sub_title="单个: 8080 | 区间: 8000-9000 / 8000~9000 | 括号: [8000,9000] | 比较: >8000 / >=8000 / <8000 / <=8000",
+                    title=t["title_syntax_help"],
+                    sub_title=t["subtitle_syntax_help"],
                     icon=_icon("📖"),
                 )
             )
         return results
 
-    def _single_port_results(self, port: int) -> list[Result]:
+    def _single_port_results(self, port: int, t: dict[str, str]) -> list[Result]:
         status = check_port_occupancy(port)
         cmds = check_commands(port)
 
         if status.unknown:
-            icon_emoji, status_text = "❓", "占用情况未知 (需管理员权限才能准确探测)"
+            icon_emoji, status_text = "❓", t["status_unknown"]
         elif status.in_use:
             parts: list[str] = []
             if status.tcp_in_use:
                 parts.append("TCP")
             if status.udp_in_use:
                 parts.append("UDP")
-            icon_emoji, status_text = "🔴", f"本机已被占用 ({'+'.join(parts)})"
+            icon_emoji, status_text = "🔴", t["status_in_use"].format(protocols="+".join(parts))
         else:
-            icon_emoji, status_text = "🟢", "本机未占用"
+            icon_emoji, status_text = "🟢", t["status_free"]
 
         return [
             Result(
-                title=f"端口 {port}  {icon_emoji} {status_text}",
-                sub_title=f"{status_text} · 回车复制端口号，或从操作中复制各平台查验命令",
+                title=t["title_single"].format(port=port, icon=icon_emoji, status=status_text),
+                sub_title=t["subtitle_single"],
                 icon=_icon(icon_emoji),
                 actions=[
-                    _copy_action("复制端口号", "📋", str(port), is_default=True),
-                    _copy_action("复制 Windows CMD 查验命令", "🪟", cmds["windows_cmd"]),
-                    _copy_action("复制 PowerShell 查验命令", "💙", cmds["powershell"]),
-                    _copy_action("复制 macOS / Linux lsof 命令", "🍎", cmds["lsof"]),
-                    _copy_action("复制 Linux ss 命令", "🐧", cmds["ss"]),
+                    _copy_action(t["action_copy_port"], "📋", str(port), is_default=True),
+                    _copy_action(t["action_copy_windows_cmd"], "🪟", cmds["windows_cmd"]),
+                    _copy_action(t["action_copy_powershell"], "💙", cmds["powershell"]),
+                    _copy_action(t["action_copy_lsof"], "🍎", cmds["lsof"]),
+                    _copy_action(t["action_copy_ss"], "🐧", cmds["ss"]),
                 ],
             )
         ]

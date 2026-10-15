@@ -39,7 +39,7 @@ format: check-init check-dev-deps
 	uv run ruff format src
 
 test: check-init
-	uv run python -m unittest tests/test_port.py
+	uv run python -m unittest tests/test_port.py tests/test_i18n.py
 
 clean:
 ifeq ($(OS),Windows_NT)

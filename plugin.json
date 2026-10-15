@@ -3,8 +3,8 @@
     "TriggerKeywords": [
         "port"
     ],
-    "Name": "PortGenerator",
-    "Description": "Check port usage / Generate random ports.",
+    "Name": "i18n:plugin_name",
+    "Description": "i18n:plugin_description",
     "Author": "dragonish",
     "Version": "0.0.1",
     "MinWoxVersion": "2.0.0",
@@ -16,5 +16,59 @@
         "Windows",
         "Linux",
         "Darwin"
-    ]
+    ],
+    "I18n": {
+        "en_US": {
+            "plugin_name": "PortGenerator",
+            "plugin_description": "Check port usage / Generate random ports.",
+            "err_range_out_of_bounds": "Port range must be within {min}-{max}",
+            "err_low_gt_high": "Lower bound is greater than upper bound, no available ports",
+            "err_port_out_of_bounds": "Port must be within {min}-{max}",
+            "err_range_parse": "Unable to parse range numbers",
+            "err_range_required": "Please provide a range, e.g. 8000-9000",
+            "err_unrecognized": "Unrecognized format",
+            "title_invalid_format": "Invalid format",
+            "subtitle_invalid_format": "{error} · Examples: 8080 / 8000-9000 / [8000,9000] / >=8000",
+            "title_syntax_help": "Port syntax reference",
+            "subtitle_syntax_help": "Single: 8080 | Range: 8000-9000 / 8000~9000 | Brackets: [8000,9000] | Compare: >8000 / >=8000 / <8000 / <=8000",
+            "title_candidate": "Candidate: {port} (free)",
+            "subtitle_candidate": "A free port randomly picked within {low}-{high} · Press Enter to copy the port number",
+            "action_copy_port": "Copy port number",
+            "status_unknown": "Usage unknown (admin privileges required for accurate detection)",
+            "status_in_use": "Already in use on this machine ({protocols})",
+            "status_free": "Free on this machine",
+            "title_single": "Port {port}  {icon} {status}",
+            "subtitle_single": "Press Enter to copy the port number, or copy platform-specific check commands from the actions",
+            "action_copy_windows_cmd": "Copy Windows CMD check command",
+            "action_copy_powershell": "Copy PowerShell check command",
+            "action_copy_lsof": "Copy macOS / Linux lsof command",
+            "action_copy_ss": "Copy Linux ss command"
+        },
+        "zh_CN": {
+            "plugin_name": "端口生成器",
+            "plugin_description": "检查端口占用 / 生成随机可用端口。",
+            "err_range_out_of_bounds": "端口范围须在 {min}-{max} 内",
+            "err_low_gt_high": "下限大于上限，没有可用端口",
+            "err_port_out_of_bounds": "端口须在 {min}-{max} 内",
+            "err_range_parse": "区间数字无法解析",
+            "err_range_required": "请给出范围，如 8000-9000",
+            "err_unrecognized": "无法识别的格式",
+            "title_invalid_format": "格式不正确",
+            "subtitle_invalid_format": "{error} · 例如: 8080 / 8000-9000 / [8000,9000] / >=8000",
+            "title_syntax_help": "端口语法速查",
+            "subtitle_syntax_help": "单个: 8080 | 区间: 8000-9000 / 8000~9000 | 括号: [8000,9000] | 比较: >8000 / >=8000 / <8000 / <=8000",
+            "title_candidate": "候选: {port} (未占用)",
+            "subtitle_candidate": "在 {low}-{high} 内随机抽到的空闲端口 · 回车复制端口号",
+            "action_copy_port": "复制端口号",
+            "status_unknown": "占用情况未知 (需管理员权限才能准确探测)",
+            "status_in_use": "本机已被占用 ({protocols})",
+            "status_free": "本机未占用",
+            "title_single": "端口 {port}  {icon} {status}",
+            "subtitle_single": "回车复制端口号，或从操作中复制各平台查验命令",
+            "action_copy_windows_cmd": "复制 Windows CMD 查验命令",
+            "action_copy_powershell": "复制 PowerShell 查验命令",
+            "action_copy_lsof": "复制 macOS / Linux lsof 命令",
+            "action_copy_ss": "复制 Linux ss 命令"
+        }
+    }
 }
