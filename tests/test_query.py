@@ -2,7 +2,7 @@ import unittest
 
 from wox_plugin import Context, Query, QueryEnv, QueryType, Selection
 
-from src.main import MyPlugin
+from src.port_main import MyPlugin
 
 
 class TestMyPlugin(unittest.TestCase):

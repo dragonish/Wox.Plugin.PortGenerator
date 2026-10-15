@@ -10,7 +10,7 @@
     "MinWoxVersion": "2.0.0",
     "Runtime": "python",
     "Website": "https://github.com/dragonish/Wox.Plugin.PortGenerator",
-    "Entry": "main.py",
+    "Entry": "port_main.py",
     "Icon": "relative:images/app.svg",
     "SupportedOS": [
         "Windows",
