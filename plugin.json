@@ -1,15 +1,15 @@
 {
-    "Id": "{{.Id}}",
+    "Id": "24fe7e7c-60c7-4b57-82e7-f30e6a29e040",
     "TriggerKeywords": [
-        "{{.TriggerKeyword}}"
+        "port"
     ],
-    "Name": "{{.Name}}",
-    "Description": "{{.Description}}",
-    "Author": "{{.Author}}",
+    "Name": "PortGenerator",
+    "Description": "Check port usage / Generate random ports.",
+    "Author": "dragonish",
     "Version": "0.0.1",
     "MinWoxVersion": "2.0.0",
     "Runtime": "python",
-    "Website": "{{.Website}}",
+    "Website": "https://github.com/dragonish/Wox.Plugin.PortGenerator",
     "Entry": "main.py",
     "Icon": "relative:images/app.svg",
     "SupportedOS": [
