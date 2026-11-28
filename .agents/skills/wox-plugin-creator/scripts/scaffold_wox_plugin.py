@@ -1,54 +1,44 @@
 #!/usr/bin/env python3
 import argparse
 import getpass
+import http.client
+import importlib.util
 import json
 import shutil
 import subprocess
+import urllib.request
 import uuid
 from pathlib import Path
 
-RUNTIMES = ["nodejs", "python", "script-nodejs", "script-python"]
+RUNTIMES = [
+    "nodejs",
+    "python",
+    "singlefile",
+    "singlefile-nodejs",
+    "singlefile-python",
+]
+AUTO_RUNTIME_TYPES = {
+    "singlefile": {"nodejs": "singlefile-nodejs", "python": "singlefile-python"},
+}
 TEMPLATE_REPOS = {
     "nodejs": "https://github.com/Wox-launcher/Wox.Plugin.Template.Nodejs",
     "python": "https://github.com/Wox-launcher/Wox.Plugin.Template.Python",
 }
+SINGLE_FILE_MIN_WOX_VERSION = "2.4.2"
+SINGLE_FILE_TEMPLATE_URL = (
+    "https://raw.githubusercontent.com/Wox-launcher/Wox/master/"
+    ".agents/skills/wox-plugin-creator/assets/single_file_plugin_templates"
+)
 
 
-def detect_repo_root() -> Path:
-    start = Path(__file__).resolve()
-    for parent in [start] + list(start.parents):
-        if (parent / "wox.core").is_dir():
-            return parent
-    raise SystemExit("Unable to locate repo root containing 'wox.core'.")
-
-
-def get_skill_templates_dir() -> Path:
-    home_dir = Path.home()
-    skills_dir = (
-        home_dir
-        / ".wox"
-        / "ai"
-        / "skills"
-        / "wox-plugin-creator"
-        / "assets"
-        / "script_plugin_templates"
-    )
-    if skills_dir.is_dir():
-        return skills_dir
-
-    repo_root = detect_repo_root()
-    return (
-        repo_root
-        / "wox.core/resource/ai/skills/wox-plugin-creator/assets/script_plugin_templates"
-    )
-
-
-def ensure_empty_dir(path: Path, force: bool) -> None:
-    if path.exists() and any(path.iterdir()) and not force:
-        raise SystemExit(
-            f"Output directory not empty: {path}. Use --force to overwrite."
-        )
-    path.mkdir(parents=True, exist_ok=True)
+def fetch_single_file_template(ext: str) -> str:
+    """Read the current template before writing to the live plugin directory."""
+    url = f"{SINGLE_FILE_TEMPLATE_URL}/template.{ext}"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            return response.read().decode("utf-8")
+    except (OSError, http.client.HTTPException, UnicodeDecodeError) as exc:
+        raise SystemExit(f"Could not download the plugin template from {url}: {exc}") from exc
 
 
 def prepare_clone_target(path: Path, force: bool) -> None:
@@ -93,27 +83,49 @@ def render_template(content: str, values: dict[str, str]) -> str:
     return rendered
 
 
-def scaffold_script_plugin(
-    template_path: Path, output_path: Path, values: dict[str, str]
-) -> None:
-    content = template_path.read_text(encoding="utf-8")
-    output_path.write_text(render_template(content, values), encoding="utf-8")
-
-
-def sanitize_script_name(name: str) -> str:
+def sanitize_plugin_name(name: str) -> str:
     cleaned = "".join(ch for ch in name if ch.isalnum())
     return cleaned or "Plugin"
 
 
-def default_script_entry(name: str, ext: str) -> str:
-    safe_name = sanitize_script_name(name)
-    return f"Wox.Plugin.Script.{safe_name}.{ext}"
+def default_single_file_entry(name: str, ext: str) -> str:
+    safe_name = sanitize_plugin_name(name)
+    return f"Wox.Plugin.{safe_name}.{ext}"
 
 
-def resolve_script_output(
+def user_single_file_plugins_dir() -> Path:
+    return Path.home() / ".wox" / "wox-user" / "plugins" / "single-file"
+
+
+def choose_local_runtime() -> str:
+    script = Path(__file__).with_name("detect_local_runtime.py")
+    spec = importlib.util.spec_from_file_location("detect_local_runtime", script)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"Unable to load runtime detector: {script}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.choose_runtime()
+
+
+def resolve_auto_runtime_type(plugin_type: str) -> str:
+    mapping = AUTO_RUNTIME_TYPES.get(plugin_type)
+    if mapping is None:
+        return plugin_type
+    runtime = choose_local_runtime()
+    resolved = mapping.get(runtime)
+    if resolved is None:
+        raise SystemExit(
+            "No usable Node.js 20+ or Python 3.10+ found. "
+            "Install one of them, or pass an explicit --type."
+        )
+    return resolved
+
+
+def resolve_single_file_output(
     output_dir: Path, entry: str, ext: str, force: bool
 ) -> tuple[Path, str]:
-    if output_dir.suffix == f".{ext}":
+    """Write one plugin file. The live user directory is already populated."""
+    if output_dir.suffix.lower() == f".{ext}":
         if output_dir.exists() and output_dir.is_dir():
             raise SystemExit(f"Output path is a directory: {output_dir}")
         if output_dir.exists() and not force:
@@ -123,19 +135,26 @@ def resolve_script_output(
         output_dir.parent.mkdir(parents=True, exist_ok=True)
         return output_dir, output_dir.name
 
-    ensure_empty_dir(output_dir, force)
+    output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / entry
     if output_path.exists() and not force:
         raise SystemExit(
             f"Output file already exists: {output_path}. Use --force to overwrite."
         )
-    return output_path, entry
+    return output_path, output_path.name
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Scaffold Wox plugins")
     parser.add_argument("--type", required=True, choices=RUNTIMES)
-    parser.add_argument("--output-dir", required=True)
+    parser.add_argument(
+        "--output-dir",
+        default="",
+        help=(
+            "Plugin output path. Required except for single-file SDK plugins, "
+            "which default to ~/.wox/wox-user/plugins/single-file/"
+        ),
+    )
     parser.add_argument("--plugin-id", default="")
     parser.add_argument("--name", default="")
     parser.add_argument("--description", default="")
@@ -147,7 +166,16 @@ def main() -> None:
     parser.add_argument("--force", action="store_true")
 
     args = parser.parse_args()
-    output_dir = Path(args.output_dir).resolve()
+    args.type = resolve_auto_runtime_type(args.type)
+    if args.type.startswith("singlefile-"):
+        if args.output_dir:
+            output_dir = Path(args.output_dir).expanduser().resolve()
+        else:
+            output_dir = user_single_file_plugins_dir()
+    else:
+        if not args.output_dir:
+            raise SystemExit("--output-dir is required")
+        output_dir = Path(args.output_dir).expanduser().resolve()
 
     if not args.name:
         raise SystemExit("--name is required")
@@ -164,12 +192,23 @@ def main() -> None:
     description = args.description or args.name
     author = args.author or getpass.getuser()
 
+    min_wox_version = args.min_wox_version
+    runtime = ""
+    if args.type == "singlefile-python":
+        runtime = "PYTHON"
+    elif args.type == "singlefile-nodejs":
+        runtime = "NODEJS"
+    if args.type.startswith("singlefile-") and args.min_wox_version == "2.0.0":
+        min_wox_version = SINGLE_FILE_MIN_WOX_VERSION
+
     values = {
         "PluginID": plugin_id,
         "Name": args.name,
         "Description": description,
         "Author": author,
         "TriggerKeywordsJSON": trigger_keywords_json,
+        "Runtime": runtime,
+        "MinWoxVersion": min_wox_version,
     }
 
     if args.type in TEMPLATE_REPOS:
@@ -181,25 +220,17 @@ def main() -> None:
         print(f"Cloned {args.type} template into {output_dir}")
         return
 
-    templates_dir = get_skill_templates_dir()
-    if args.type == "script-nodejs":
-        template_path = templates_dir / "template.js"
-        entry = args.entry or default_script_entry(args.name, "js")
-        output_path, entry_name = resolve_script_output(
-            output_dir, entry, "js", args.force
-        )
-    elif args.type == "script-python":
-        template_path = templates_dir / "template.py"
-        entry = args.entry or default_script_entry(args.name, "py")
-        output_path, entry_name = resolve_script_output(
-            output_dir, entry, "py", args.force
-        )
-    else:
-        raise SystemExit(f"Unsupported script runtime: {args.type}")
-    values["ENTRY"] = entry_name
-    scaffold_script_plugin(template_path, output_path, values)
+    if args.type.startswith("singlefile-"):
+        ext = "js" if args.type == "singlefile-nodejs" else "py"
+        entry = args.entry or default_single_file_entry(args.name, ext)
+        output_path, entry_name = resolve_single_file_output(output_dir, entry, ext, args.force)
+        template = fetch_single_file_template(ext)
+        values["ENTRY"] = entry_name
+        output_path.write_text(render_template(template, values), encoding="utf-8")
+        print(f"Scaffolded {args.type} plugin at {output_path}")
+        return
 
-    print(f"Scaffolded {args.type} plugin at {output_dir}")
+    raise SystemExit(f"Unsupported plugin type: {args.type}")
 
 
 if __name__ == "__main__":
